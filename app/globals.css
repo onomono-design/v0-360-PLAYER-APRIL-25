@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  overflow: hidden;
+  position: fixed;
+  height: 100%;
+  width: 100%;
+  touch-action: none;
+}
+
+body {
+  background-color: #000;
+  color: #fff;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.network-status {
+  display: none;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes tiltDevice {
+  0% {
+    transform: perspective(500px) rotateY(-15deg) rotateX(5deg);
+  }
+  100% {
+    transform: perspective(500px) rotateY(15deg) rotateX(-5deg);
+  }
+}

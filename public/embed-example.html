@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>360° Video Player Embed Example</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+    
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+    
+    .header {
+      padding: 20px;
+      background-color: #333;
+      color: white;
+    }
+    
+    .content {
+      padding: 20px;
+    }
+    
+    .audio-player {
+      width: 100%;
+      margin-bottom: 20px;
+    }
+    
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    
+    button {
+      padding: 8px 16px;
+      background-color: #2196F3;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    
+    button:hover {
+      background-color: #0d8bf2;
+    }
+    
+    button.active {
+      background-color: #ff5722;
+    }
+    
+    .scrubber-container {
+      width: 100%;
+      padding: 10px 0;
+    }
+    
+    .scrubber {
+      width: 100%;
+      cursor: pointer;
+    }
+    
+    .xr-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1000;
+      background-color: #000;
+      display: none;
+    }
+    
+    .xr-container.active {
+      display: block;
+    }
+    
+    .time-display {
+      font-family: monospace;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>360° Video Player Embed Example</h1>
+    </div>
+    
+    <div class="content">
+      <h2>Audio Player</h2>
+      
+      <audio id="audio-player" class="audio-player" controls>
+        <source src="https://cmm-cloud-storage.s3.us-east-2.amazonaws.com/audio-track.mp3" type="audio/mp3">
+        Your browser does not support the audio element.
+      </audio>
+      
+      <div class="controls">
+        <button id="play-button">Play</button>
+        <button id="pause-button">Pause</button>
+        <button id="xr-button">Enter XR Mode</button>
+        <button id="recenter-button">Recenter View</button>
+      </div>
+      
+      <div class="scrubber-container">
+        <input id="scrubber" class="scrubber" type="range" min="0" max="100" value="0">
+      </div>
+      
+      <div class="time-display">
+        <span id="current-time">0:00</span> / <span id="duration">0:00</span>
+      </div>
+      
+      <div id="status" style="margin-top: 20px; color: #666;"></div>
+    </div>
+  </div>
+  
+  <!-- Container for the XR player iframe -->
+  <div id="xr-container" class="xr-container">
+    <!-- iframe will be inserted here by JavaScript -->
+  </div>
+  
+  <script>
+    // Store reference to the iframe
+    let xrPlayerIframe = null;
+    let xrPlayerReady = false;
+    let xrMode = false;
+    
+    // Format time in MM:SS format
+    function formatTime(seconds) {
+      if (isNaN(seconds) || !isFinite(seconds)) {
+        return "0:00";
+      }
+      
+      const minutes = Math.floor(seconds / 60);
+      const remainingSeconds = Math.floor(seconds % 60);
+      const formattedSeconds = remainingSeconds < 10 ? `0${remainingSeconds}` : `${remainingSeconds}`;
+      
+      return `${minutes}:${formattedSeconds}`;
+    }
+    
+    // Function to initialize the XR player
+    function initXRPlayer() {
+      // Create the iframe if it doesn't exist
+      if (!xrPlayerIframe) {
+        xrPlayerIframe = document.createElement('iframe');
+        xrPlayerIframe.id = 'xr-player-iframe';
+        xrPlayerIframe.src = window.location.origin + '?headless=true';
+        xrPlayerIframe.style.position = 'absolute';
+        xrPlayerIframe.style.top = '0';
+        xrPlayerIframe.style.left = '0';
+        xrPlayerIframe.style.width = '100%';
+        xrPlayerIframe.style.height = '100%';
+        xrPlayerIframe.style.border = 'none';
+        xrPlayerIframe.style.zIndex = '1000';
+        xrPlayerIframe.allow = 'accelerometer; gyroscope; magnetometer; autoplay; fullscreen';
+        xrPlayerIframe.allowFullscreen = true;
+        
+        // Initially hide the iframe
+        xrPlayerIframe.style.display = 'none';
+        
+        // Add to the container
+        const xrContainer = document.getElementById('xr-container');
+        xrContainer.appendChild(xrPlayerIframe);
+        
+        // Listen for messages from the iframe
+        window.addEventListener('message', handleXRPlayerMessage);
+        
+        updateStatus("XR player initialized, waiting for ready signal...");
+      }
+    }
+    
+    // Function to handle messages from the XR player
+    function handleXRPlayerMessage(event) {
+      // Verify the origin if needed in production
+      // if (event.origin !== window.location.origin) return;
+      
+      const data = event.data;
+      
+      if (data.type === "PLAYER_READY") {
+        console.log("XR player is ready with capabilities:", data.capabilities);
+        xrPlayerReady = true;
+        updateStatus("XR player is ready");
+        
+        // Send initial configuration
+        sendConfigToXRPlayer();
+        
+        // If we're already in XR mode, sync the current playback state
+        if (xrMode) {
+          syncXRPlayer();
+        }
+      }
+      
+      if (data.type === "TIME_UPDATE") {
+        // You can use this to verify sync is working
+        console.log("XR player time:", data.currentTime);
+      }
+      
+      if (data.type === "PLAYBACK_STATE_CHANGE") {
+        updateStatus(`XR player state changed: ${data.isPlaying ? 'playing' : 'paused'} at ${formatTime(data.currentTime)}`);
+      }
+      
+      if (data.type === "BUFFERING_START") {
+        updateStatus("XR player is buffering...");
+      }
+      
+      if (data.type === "BUFFERING_END") {
+        updateStatus("XR player buffering complete");
+      }
+      
+      if (data.type === "ERROR") {
+        updateStatus("XR player error: " + data.message);
+      }
+      
+      if (data.type === "RECENTERED") {
+        updateStatus("XR player view recentered");
+      }
+    }
+    
+    // Function to send configuration to the XR player
+    function sendConfigToXRPlayer() {
+      if (!xrPlayerIframe || !xrPlayerReady) return;
+      
+      const config = {
+        VIDEO_360_SOURCE: "https://cmm-cloud-storage.  return;
+      
+      const config = {
+        VIDEO_360_SOURCE: "https://cmm-cloud-storage.s3.us-east-2.amazonaws.com/2025-03-08-JAPANTOWN-XR1-LOW.mp4",
+        chapter: {
+          trackName: "Chinatown Memories",
+          trackOrder: "1",
+          // Add other chapter properties as needed
+        }
+      };
+      
+      xrPlayerIframe.contentWindow.postMessage({
+        type: "SET_PLAYER_CONFIG",
+        config: config
+      }, "*");
+      
+      updateStatus("Configuration sent to XR player");
+    }
+    
+    // Function to toggle XR mode
+    function toggleXRMode() {
+      xrMode = !xrMode;
+      
+      const xrButton = document.getElementById('xr-button');
+      const xrContainer = document.getElementById('xr-container');
+      
+      if (xrMode) {
+        // Show the XR player
+        xrContainer.classList.add('active');
+        xrButton.classList.add('active');
+        xrButton.textContent = 'Exit XR Mode';
+        
+        // Sync the current playback state
+        syncXRPlayer();
+        
+        updateStatus("Entered XR mode");
+      } else {
+        // Hide the XR player
+        xrContainer.classList.remove('active');
+        xrButton.classList.remove('active');
+        xrButton.textContent = 'Enter XR Mode';
+        
+        updateStatus("Exited XR mode");
+      }
+    }
+    
+    // Function to sync the XR player with the audio player
+    function syncXRPlayer() {
+      if (!xrPlayerIframe || !xrPlayerReady || !xrMode) return;
+      
+      // Get current audio player state
+      const audioPlayer = document.getElementById('audio-player');
+      const currentTime = audioPlayer.currentTime;
+      const isPlaying = !audioPlayer.paused;
+      
+      // Send sync command to XR player
+      xrPlayerIframe.contentWindow.postMessage({
+        type: "SYNC",
+        currentTime: currentTime,
+        isPlaying: isPlaying
+      }, "*");
+      
+      updateStatus(`Synced XR player to ${formatTime(currentTime)}, ${isPlaying ? 'playing' : 'paused'}`);
+    }
+    
+    // Function to send playback commands to the XR player
+    function sendPlaybackCommand(command, value) {
+      if (!xrPlayerIframe || !xrPlayerReady || !xrMode) return;
+      
+      xrPlayerIframe.contentWindow.postMessage({
+        type: "PLAYBACK_COMMAND",
+        command: command,
+        value: value
+      }, "*");
+      
+      updateStatus(`Sent command to XR player: ${command}${value !== undefined ? ' ' + value : ''}`);
+    }
+    
+    // Function to update status display
+    function updateStatus(message) {
+      const statusElement = document.getElementById('status');
+      statusElement.textContent = message;
+    }
+    
+    // Hook up to your existing audio player controls
+    document.addEventListener('DOMContentLoaded', function() {
+      // Initialize the XR player
+      initXRPlayer();
+      
+      // Get references to your existing controls
+      const audioPlayer = document.getElementById('audio-player');
+      const playButton = document.getElementById('play-button');
+      const pauseButton = document.getElementById('pause-button');
+      const scrubber = document.getElementById('scrubber');
+      const xrButton = document.getElementById('xr-button');
+      const recenterButton = document.getElementById('recenter-button');
+      const currentTimeElement = document.getElementById('current-time');
+      const durationElement = document.getElementById('duration');
+      
+      // Update duration when metadata is loaded
+      audioPlayer.addEventListener('loadedmetadata', function() {
+        durationElement.textContent = formatTime(audioPlayer.duration);
+        scrubber.max = 100;
+      });
+      
+      // Update current time display and scrubber position
+      audioPlayer.addEventListener('timeupdate', function() {
+        currentTimeElement.textContent = formatTime(audioPlayer.currentTime);
+        
+        // Update scrubber position
+        if (!scrubberDragging) {
+          const percentage = (audioPlayer.currentTime / audioPlayer.duration) * 100;
+          scrubber.value = percentage;
+        }
+        
+        // Only sync periodically to avoid overwhelming the iframe
+        if (xrMode && Math.floor(audioPlayer.currentTime * 4) % 4 === 0) {
+          syncXRPlayer();
+        }
+      });
+      
+      // Hook up the XR toggle button
+      xrButton.addEventListener('click', toggleXRMode);
+      
+      // Hook up the recenter button
+      recenterButton.addEventListener('click', function() {
+        sendPlaybackCommand('recenter');
+      });
+      
+      // Hook up play button
+      playButton.addEventListener('click', function() {
+        audioPlayer.play();
+        // If in XR mode, also play the video
+        sendPlaybackCommand('play');
+      });
+      
+      // Hook up pause button
+      pauseButton.addEventListener('click', function() {
+        audioPlayer.pause();
+        // If in XR mode, also pause the video
+        sendPlaybackCommand('pause');
+      });
+      
+      // Track scrubber dragging
+      let scrubberDragging = false;
+      
+      // Hook up scrubber
+      scrubber.addEventListener('mousedown', function() {
+        scrubberDragging = true;
+      });
+      
+      scrubber.addEventListener('mouseup', function() {
+        scrubberDragging = false;
+        const seekTime = (scrubber.value / 100) * audioPlayer.duration;
+        audioPlayer.currentTime = seekTime;
+        // If in XR mode, also seek the video
+        sendPlaybackCommand('seek', seekTime);
+      });
+      
+      scrubber.addEventListener('input', function() {
+        const seekTime = (scrubber.value / 100) * audioPlayer.duration;
+        currentTimeElement.textContent = formatTime(seekTime);
+      });
+      
+      // Listen for play/pause events on the audio player
+      audioPlayer.addEventListener('play', function() {
+        if (xrMode) {
+          sendPlaybackCommand('play');
+        }
+      });
+      
+      audioPlayer.addEventListener('pause', function() {
+        if (xrMode) {
+          sendPlaybackCommand('pause');
+        }
+      });
+      
+      // Listen for seeking events on the audio player
+      audioPlayer.addEventListener('seeking', function() {
+        if (xrMode) {
+          sendPlaybackCommand('seek', audioPlayer.currentTime);
+        }
+      });
+      
+      updateStatus("Page loaded. Click 'Enter XR Mode' to start the 360° experience.");
+    });
+  </script>
+</body>
+</html>
